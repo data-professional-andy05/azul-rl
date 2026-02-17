@@ -1,0 +1,29 @@
+name: azul_rl
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  # Core Python & Data
+  - python=3.10  # 3.10 is very stable for RL libraries currently
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+
+  # RL & AI Frameworks
+  - gymnasium  # The standard for creating the environment
+  - pytorch    # The Deep Learning engine (CPU version is fine for Azul)
+  - stable-baselines3 # Pre-built RL algorithms (PPO, DQN, etc.)
+
+  # Development Tools
+  - ipykernel  # To run Notebooks in VS Code
+  - jupyter
+  - tqdm       # Progress bars for training loops
+  - black      # Code formatter (essential for clean code)
+  - pytest     # We need to test the game logic rigorously
+
+  # Pip fallback (just in case)
+  - pip
+  - pip:
+      - shimmy>=0.2.1  # often needed for gymnasium compatibility

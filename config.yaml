@@ -1,0 +1,26 @@
+# config.yaml
+
+# --- Reinforcement Learning Rewards ---
+# The signals the AI receives to know if it did good or bad
+rewards:
+  win: 50.0
+  loss: -50.0
+  tie: 10.0
+  
+  # Step-by-step rewards
+  score_scaling: 1.0       # Multiplier for raw game score
+  invalid_action: -20.0    # Penalty for trying to break rules (e.g., placing red on blue spot)
+  
+  # Strategic Shaping (Future use)
+  wall_tile_placed: 0.0    
+
+# --- Training Hyperparameters ---
+training:
+  total_timesteps: 1000000
+  learning_rate: 0.0003
+  batch_size: 64
+  gamma: 0.99              # Discount factor
+
+# --- Environment Settings ---
+env:
+  render_mode: null        # Set to "human" later to watch it play
