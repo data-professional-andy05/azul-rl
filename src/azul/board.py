@@ -57,6 +57,7 @@ class PlayerBoard:
             overflow = count - space_remaining
             self.pattern_lines_count[row_idx] += placed
             self._add_to_floor_line(color, overflow)
+            
         return True
 
     def _add_to_floor_line(self, color, count):
@@ -66,71 +67,48 @@ class PlayerBoard:
                 self.floor_line_count += 1
 
     def calculate_round_bonuses(self, verbose=False):
-        """
-        Executes end-of-round logic.
-        Returns: 
-            points (int): The score for this round.
-            discarded_tiles (list): List of color IDs to return to the box.
-            logs (list): Text description of scoring events.
-        """
         round_score = 0
         discarded_tiles = []
         logs = []
 
-        # 1. Process Pattern Lines (Top to Bottom)
         for row in range(GRID_SIZE):
             capacity = self.get_row_capacity(row)
-            
             if self.pattern_lines_count[row] == capacity:
                 color = self.pattern_lines_color[row]
                 col = np.where(WALL_PATTERN[row] == color)[0][0]
                 
-                # A. Move to Wall
                 self.wall[row, col] = color
-                
-                # B. Calculate Score
-                pts, log_msg = self._calculate_placement_score(row, col, return_log=True)
+                # Pass self.wall implicitly
+                pts, log_msg = self._calculate_placement_score(row, col, self.wall, return_log=True)
                 round_score += pts
-                if verbose: 
-                    logs.append(f"Row {row} (Col {col}): {log_msg}")
+                if verbose: logs.append(f"Row {row}: {log_msg}")
                 
-                # C. Recycle Remaining Tiles
                 num_discarded = capacity - 1
                 if num_discarded > 0:
                     discarded_tiles.extend([color] * num_discarded)
                 
-                # D. Reset Pattern Line
                 self.pattern_lines_count[row] = 0
                 self.pattern_lines_color[row] = EMPTY
             
-        # 2. Process Floor Line Logic
         penalty = 0
-        limit = min(self.floor_line_count, len(FLOOR_LINE_SCORES)) # Use len to avoid index error
+        limit = min(self.floor_line_count, len(FLOOR_LINE_SCORES))
+        for i in range(limit): penalty += FLOOR_LINE_SCORES[i]
         
-        for i in range(limit):
-             penalty += FLOOR_LINE_SCORES[i]
-        
-        # If overflowing beyond defined scores, use max penalty (-3)
         if self.floor_line_count > len(FLOOR_LINE_SCORES):
              penalty += (self.floor_line_count - len(FLOOR_LINE_SCORES)) * FLOOR_LINE_SCORES[-1]
 
-        if penalty != 0 and verbose:
-            logs.append(f"Floor Line Penalty: {penalty} ({self.floor_line_count} tiles)")
+        if penalty != 0 and verbose: logs.append(f"Floor Penalty: {penalty}")
 
         round_score += penalty
         
-        # Recycle Floor Tiles
         limit_recycle = min(self.floor_line_count, FLOOR_LINE_CAPACITY)
         for i in range(limit_recycle):
             tile = self.floor_line[i]
-            if tile != EMPTY and tile != 6: 
-                discarded_tiles.append(tile)
+            if tile != EMPTY and tile != 6: discarded_tiles.append(tile)
 
-        # Apply Score (Floor at 0)
         self.score += round_score
         if self.score < 0: self.score = 0
 
-        # Clear Floor Line
         self.floor_line.fill(EMPTY)
         self.floor_line_count = 0
         
@@ -138,69 +116,95 @@ class PlayerBoard:
 
     def calculate_end_game_score(self):
         bonus = 0
-        # Rows
         for r in range(GRID_SIZE):
             if np.count_nonzero(self.wall[r]) == GRID_SIZE: bonus += 2
-        # Columns
         for c in range(GRID_SIZE):
             if np.count_nonzero(self.wall[:, c]) == GRID_SIZE: bonus += 7
-        # Colors
         for color in range(1, 6): 
             if np.count_nonzero(self.wall == color) == GRID_SIZE: bonus += 10
-                
         self.score += bonus
         return bonus
 
-    def _calculate_placement_score(self, row, col, return_log=False):
-        # Horizontal Check
+    # --- THE FULLY SIMULATED SCORE ---
+    def get_complete_virtual_score(self):
+        """
+        Simulates the end of the round AND the end of the game.
+        Returns: Current Score + Immediate Placement Points + Penalties + End Game Bonuses.
+        """
+        v_wall = self.wall.copy()
+        v_score = self.score
+        
+        # 1. Simulate Placement Points (Waterfall)
+        for row in range(GRID_SIZE):
+            capacity = self.get_row_capacity(row)
+            if self.pattern_lines_count[row] == capacity:
+                color = self.pattern_lines_color[row]
+                col = np.where(WALL_PATTERN[row] == color)[0][0]
+                
+                # Update Virtual Wall
+                v_wall[row, col] = color
+                
+                # Calculate Points using Virtual Wall
+                pts = self._calculate_placement_score(row, col, v_wall)
+                v_score += pts
+
+        # 2. Simulate Floor Penalty
+        penalty = 0
+        limit = min(self.floor_line_count, len(FLOOR_LINE_SCORES))
+        for i in range(limit): penalty += FLOOR_LINE_SCORES[i]
+        
+        if self.floor_line_count > len(FLOOR_LINE_SCORES):
+             penalty += (self.floor_line_count - len(FLOOR_LINE_SCORES)) * FLOOR_LINE_SCORES[-1]
+             
+        v_score += penalty
+        if v_score < 0: v_score = 0
+        
+        # 3. Add End Game Bonuses (Based on Virtual Wall)
+        bonus = 0
+        for r in range(GRID_SIZE):
+            if np.count_nonzero(v_wall[r]) == GRID_SIZE: bonus += 2
+        for c in range(GRID_SIZE):
+            if np.count_nonzero(v_wall[:, c]) == GRID_SIZE: bonus += 7
+        for color in range(1, 6): 
+            if np.count_nonzero(v_wall == color) == GRID_SIZE: bonus += 10
+            
+        return v_score + bonus
+
+    def _calculate_placement_score(self, row, col, wall_state, return_log=False):
+        """
+        Calculates adjacency score.
+        Args:
+            wall_state: The matrix to check against (Real or Virtual).
+        """
+        # Horizontal
         horiz_points = 0
-        # Check Left
         c = col - 1
-        while c >= 0 and self.wall[row, c] != EMPTY:
+        while c >= 0 and wall_state[row, c] != EMPTY:
             horiz_points += 1
             c -= 1
-        # Check Right
         c = col + 1
-        while c < GRID_SIZE and self.wall[row, c] != EMPTY:
+        while c < GRID_SIZE and wall_state[row, c] != EMPTY:
             horiz_points += 1
             c += 1
-            
-        # If neighbors found, add self (total length)
-        # If no neighbors, horiz_points is 0
         if horiz_points > 0: horiz_points += 1 
 
-        # Vertical Check
+        # Vertical
         vert_points = 0
-        # Check Up
         r = row - 1
-        while r >= 0 and self.wall[r, col] != EMPTY:
+        while r >= 0 and wall_state[r, col] != EMPTY:
             vert_points += 1
             r -= 1
-        # Check Down
         r = row + 1
-        while r < GRID_SIZE and self.wall[r, col] != EMPTY:
+        while r < GRID_SIZE and wall_state[r, col] != EMPTY:
             vert_points += 1
             r += 1
-            
         if vert_points > 0: vert_points += 1 
 
-        # Final Calculation
         total = 0
-        if horiz_points == 0 and vert_points == 0:
-            total = 1 
-        else:
-            # If both directions have points, the tile counts twice (once in each sum)
-            # Example:  X
-            #         Y Z A
-            #           B
-            # Placing Z (at center):
-            # Horiz: Y-Z-A (3)
-            # Vert: X-Z-B (3)
-            # Total: 6
-            total = max(horiz_points, 0) + max(vert_points, 0)
+        if horiz_points == 0 and vert_points == 0: total = 1 
+        else: total = max(horiz_points, 0) + max(vert_points, 0)
             
-        if return_log:
-            return total, f"Placed. Horiz_Chain: {horiz_points}, Vert_Chain: {vert_points}. Points: {total}"
+        if return_log: return total, f"Points: {total}"
         return total
 
     def get_state_vector(self):
